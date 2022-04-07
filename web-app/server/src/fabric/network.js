@@ -4,10 +4,11 @@
 const { FileSystemWallet, Gateway, X509WalletMixin } = require('fabric-network');
 const path = require('path');
 const fs = require('fs');
-const AWS = require('ibm-cos-sdk');
 const nodemailer = require('nodemailer');
 const uuidv1 = require('uuid/v1');
 const hasha = require('hasha');
+
+
 
 //connect to the config file
 const configPathPrefix = path.join(process.cwd(), 'config');
@@ -35,113 +36,6 @@ let smtpUserName = config.smtpUserName;
 let smtpPassword = config.smtpPassword;
 let senderEmail = config.senderEmail;
 
-let bucketName = config.cos_bucketName;
-let cos_config = {
-    endpoint: config.cos_endpoint,
-    apiKeyId: config.cos_apiKeyId,
-    serviceInstanceId: config.cos_serviceInstanceId
-};
-let cos = new AWS.S3(cos_config);
-
-//add object to COS
-exports.putObject = async function(assetId, fileContents, mimetype) {
-    console.log(`Creating new item in COS: ${assetId}`);
-    return cos.putObject({
-            Bucket: bucketName,
-            Key: assetId,
-            Body: fileContents,
-            ContentEncoding: 'base64',
-            ContentType: mimetype
-        }).promise()
-        .then((() => {
-            let response = {};
-            response.data = `Item ${assetId} created in COS.`;
-            return response;
-        }))
-        .catch((e) => {
-            let response = {};
-            response.err = `ERROR - Item could not be created in COS: ${e.code} - ${e.message}\n`;
-            return response;
-        });
-};
-
-//move in COS
-exports.moveObject = async function(sourceAssetId, destinationAssetId) {
-    console.log(`Moving the object ${sourceAssetId} in COS to ${destinationAssetId}`);
-    return cos.copyObject({
-            Bucket: bucketName,
-            CopySource: bucketName + '/' + sourceAssetId,
-            Key: destinationAssetId
-        }).promise()
-        .then((() => {
-            let response = this.deleteObject(sourceAssetId);
-            return response;
-        }))
-        .catch((e) => {
-            let response = {};
-            response.err = `ERROR - Item could not be created in COS: ${e.code} - ${e.message}\n`;
-            return response;
-        });
-};
-
-//delete object from COS
-exports.deleteObject = async function(assetId) {
-    console.log(`Deleting item from COS: ${assetId}`);
-    return cos.deleteObject({
-            Bucket: bucketName,
-            Key: assetId
-        }).promise()
-        .then((() => {
-            let response = {};
-            response.data = `Item ${assetId} deleted successfully from COS.`;
-            return response;
-        }))
-        .catch((e) => {
-            let response = {};
-            response.err = `ERROR - item could not be deleted from COS: ${e.code} - ${e.message}\n`;
-            return response;
-        });
-};
-
-//download object from COS
-exports.downloadFile = async function(assetId, assetName) {
-    console.log(`Downloading item from COS: ${assetId}`);
-    const params = {
-        Bucket: bucketName,
-        Key: assetId
-    };
-    return cos.getObject(params, (err, data) => {
-            if (err) {
-                let response = {};
-                response.err = `ERROR - Item could not be created in COS: ${err.code} - ${err.message}\n`;
-                return response;
-            }
-            // //fs.writeFileSync(assetName, data.Body.toString());
-            // let regex = /^data:(.+);base64,(.*)$/;
-            // let matches = (data.Body.toString()).match(regex);
-            // let fileData = matches[2];
-            // let response = {};
-            // response.data = fileData;
-            // return response;
-            // Body — (Buffer, Typed Array, Blob, String, ReadableStream) Object data
-
-            console.log(data.Body);
-            if (data && data.Body) {
-                return data;
-            }
-            // let buffer = Buffer.from(fileData, 'base64');
-            // fs.writeFileSync('../client/downloads/' + assetName, buffer);
-        }).promise()
-        .then(((data) => {
-            return data;
-        }))
-        .catch((e) => {
-            let response = {};
-            response.err = `ERROR - item could not be retrieved from COS: ${e.code} - ${e.message}\n`;
-            return response;
-        });
-};
-
 //connect to the blockchain network using username
 exports.connectToNetwork = async function(userName) {
     const gateway = new Gateway();
@@ -165,13 +59,18 @@ exports.connectToNetwork = async function(userName) {
         const contract = await network.getContract(smartContractName);
         const client = gateway.getClient();
         const channel = client.getChannel(channelName);
+        console.log("+++++++++++++++++++++++++++++++")
+        console.log("Get channel peers", channel.getChannelPeers());
+        console.log("+++++++++++++++++++++++++++++++")
         let event_hub = channel.newChannelEventHub(peerAddr);
+
 
         let networkObj = {
             contract: contract,
             network: network,
             gateway: gateway,
-            event_hub: event_hub
+            event_hub: event_hub,
+            channel: channel
         };
         return networkObj;
 
@@ -281,13 +180,17 @@ exports.createDigitalAsset = async function(networkObj, assetName, digitalAssetF
         console.log(`Asset Id ${assetId} was generated.`);
 
         //Step 4: Upload object to COS and obtain it's link.
-        response = await this.putObject(assetId, digitalAssetFileBuffer, digitalAssetFileType);
-        if (response.err) {
-            return response;
-        }
-        // Step 4: Update blockchain
-        response = await networkObj.contract.submitTransaction('createDigitalAsset', assetId, assetName, assetHash, createdBy);
+        // response = await this.putObject(assetId, digitalAssetFileBuffer, digitalAssetFileType);
+        // if (response.err) {
+        //     return response;
+        // }
 
+        // Step 4: Update blockchain
+        let endorsingPeers = [];
+        endorsingPeers.push(networkObj.channel.getChannelPeer(peerAddr));
+        endorsingPeers.push(networkObj.channel.getChannelPeer('peer0.org2.example.com:9051'));
+        const transaction = networkObj.contract.createTransaction('createDigitalAsset').setEndorsingPeers(endorsingPeers);
+        response = await transaction.submit(assetId, assetName, assetHash, createdBy)
         await networkObj.gateway.disconnect();
 
         return response;
@@ -677,6 +580,9 @@ exports.getHistoryForDigitalAsset = async function(assetId) {
 
 exports.registerUser = async function(emailAddress, firstName, lastName) {
 
+    console.log("========================================================")
+    console.log("Registering new user: " + emailAddress);
+
     if (!emailAddress || !firstName || !lastName) {
         let response = {};
         response.err = 'Error! You need to fill all fields before you can register!';
@@ -724,11 +630,13 @@ exports.registerUser = async function(emailAddress, firstName, lastName) {
         const enrollment = await ca.enroll({ enrollmentID: emailAddress, enrollmentSecret: secret });
         const userIdentity = await X509WalletMixin.createIdentity(orgMSPID, enrollment.certificate, enrollment.key.toBytes());
         await wallet.import(emailAddress, userIdentity);
-        console.log(`Successfully registered user ${firstName} ${lastName}. Use userName ${emailAddress} to login above.`);
+        console.log("+++++++++++++++++++++++++++++++++++++++++++")
+        console.log(`[SUCCESS] Successfully registered user ${firstName} ${lastName}. Use userName ${emailAddress} to login above.`);
         let response = `Successfully registered user ${firstName} ${lastName}. Use userName ${emailAddress} to login above.`;
         return response;
     } catch (error) {
-        console.error(`Failed to register user + ${emailAddress} + : ${error}`);
+        console.log("-------------------------------------------------")
+        console.error(`[ERROR] Failed to register user + ${emailAddress} + : ${error}`);
         let response = {};
         response.err = error;
         return response;
