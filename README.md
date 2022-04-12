@@ -66,7 +66,9 @@ Follow these steps to complete exercises that make up the project. The exercises
 2. [Build your network](#2-package-the-smart-contract)
 3. [Deploy Smart Contract on our Network](#3-create-the-mailtrap-server)
 4. [ Interact with our Smart Contract](#4-build-a-network)
-5. [Use a Website to interact with the network]
+5. [Use a Website to interact with the network](#5-deploy-blockchain-for-maintaining-digital-assets-smart-contract-on-the-network)
+
+
 
 ## 1. Downloading and running your first fabric network
 
