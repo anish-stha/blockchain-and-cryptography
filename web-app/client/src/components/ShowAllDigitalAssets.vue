@@ -39,7 +39,6 @@
     <button v-on:click="updateDigitalAsset()">Update Digital Asset</button> &nbsp;
     <button v-on:click="changeOwnershipOfAsset()">Change Ownership of Asset</button> &nbsp;
     <button v-on:click="deleteDigitalAsset()">Delete Digital Asset</button> &nbsp;
-    <button v-on:click="downloadFile(picked)">Download Digital Asset</button> &nbsp;
     <v-dialog/>
     <vue-instant-loading-spinner id="loader" ref="Spinner"></vue-instant-loading-spinner>
   </div>

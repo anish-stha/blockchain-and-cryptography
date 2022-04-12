@@ -241,111 +241,23 @@ exports.updateDigitalAsset = async function(networkObj, assetId, digitalAssetFil
             console.log('Case 1 - modifier is owner or approved user.');
             response = await this.putObject(assetId, digitalAssetFileBuffer, digitalAssetFileType);
 
-            if (response.err) {
-                let apiResponse = {};
-                apiResponse.err = 'File could not be uploaded to COS';
-                return JSON.stringify(apiResponse);
-            }
-            console.log('File uploaded to COS');
-
             // Step 4: Update blockchain
             response = await networkObj.contract.submitTransaction('updateDigitalAsset', assetId, assetHash, modifiedBy);
             //send email to asset owner
             networkObj.event_hub.connect(true);
             let regid = networkObj.event_hub.registerChaincodeEvent(smartContractName, 'UpdateDigitalAssetEvent-' + assetId, function(event) {
                 console.log(`Inside event hub code - The Digital Asset ${assetId} was successfully updated.`);
-                let eventPayload = JSON.parse(event.payload.toString());
-                let assetOwner = eventPayload.assetOwner;
-                let modifiedTimestamp = new Date(eventPayload.modifiedTimestamp).toLocaleString();
-
-                let transporter = nodemailer.createTransport({
-                    host: smtpHost,
-                    port: smtpPort,
-                    auth: {
-                        user: smtpUserName,
-                        pass: smtpPassword
-                    }
-                });
-
-                let mailOptions = {
-                    from: senderEmail,
-                    to: assetOwner,
-                    subject: 'Your digital asset was updated recently',
-                    html: '<h1>Your digital asset was updated recently.</h1>' +
-                        '<h2>Details:</h2>' +
-                        '<p>Asset Id: ' + assetId + '<br/>' +
-                        '<p>Asset Name: ' + assetName + '<br/>' +
-                        'Updated By: ' + modifiedBy + '<br/>' +
-                        'Update Timestamp: ' + new Date(modifiedTimestamp) + '<br/>' +
-                        '</p>'
-                };
-                console.log('sending case 1 email now');
-                transporter.sendMail(mailOptions, function(error) {
-                    if (error) {
-                        throw new Error(error);
-                    } else {
-                        console.log(`Successfully sent an email notification to the asset owner ${assetOwner}`);
-                        networkObj.event_hub.unregisterChaincodeEvent(regid);
-                    }
-                });
             });
         } else {
             console.log('Case 2 - modifier is not an approved user.');
             //not an already approved user
             //upload file to COS with a different name i.e. <name>_<timestamp>.ext
 
-            //Step 1: Upload file to COS with timestamp.
             let ext = path.extname(assetName);
             let temp_assetName = assetName.substring(0, assetName.indexOf(ext)) + '_' + new Date().getTime() + ext;
-            response = await this.putObject(temp_assetName, digitalAssetFileBuffer, digitalAssetFileType);
-
-            if (response.err) {
-                return 'File could not be uploaded to COS';
-            }
-            console.log('File uploaded to COS');
-
-            //Step 2 - update blockchain to include this entry under response.modificationsPendingApproval
+        
             response = await networkObj.contract.submitTransaction('addPendingModificationToDigitalAsset', assetId, temp_assetName, assetHash, modifiedBy);
             console.log('added pending modification to asset');
-            //send email to asset owner
-            networkObj.event_hub.connect(true);
-            let regid = networkObj.event_hub.registerChaincodeEvent(smartContractName, 'AddPendingModificationToDigitalAssetEvent-' + assetId, function(event) {
-                console.log(`Inside event hub code - The ModificationPendingApproval was added to the Digital Asset ${assetId} successfully.`);
-                let eventPayload = JSON.parse(event.payload.toString());
-                let assetOwner = eventPayload.assetOwner;
-                let modifiedTimestamp = new Date(eventPayload.modifiedTimestamp).toLocaleString();
-
-                let transporter = nodemailer.createTransport({
-                    host: smtpHost,
-                    port: smtpPort,
-                    auth: {
-                        user: smtpUserName,
-                        pass: smtpPassword
-                    }
-                });
-
-                let mailOptions = {
-                    from: senderEmail,
-                    to: assetOwner,
-                    subject: 'Somebody has requested to update your digital asset.',
-                    html: '<h1>Somebody has requested to update your digital asset.</h1>' +
-                        '<h2>Details:</h2>' +
-                        '<p>Asset Id: ' + assetId + '<br/>' +
-                        'Updated By: ' + modifiedBy + '<br/>' +
-                        'Update Timestamp: ' + new Date(modifiedTimestamp) + '<br/>' +
-                        '</p>' +
-                        '<b>Please visit the <a href="http://localhost:8080/?#/viewAssetModificationRequests">Digital Asset Management website</a> to approve/deny this modification.</b>'
-                };
-                console.log('sending case 2 email now');
-                transporter.sendMail(mailOptions, function(error) {
-                    if (error) {
-                        throw new Error(error);
-                    } else {
-                        console.log(`Successfully sent an email notification to the asset owner ${assetOwner}`);
-                        networkObj.event_hub.unregisterChaincodeEvent(regid);
-                    }
-                });
-            });
         }
 
         await networkObj.gateway.disconnect();
@@ -365,39 +277,7 @@ exports.changeOwnershipOfAsset = async function(networkObj, assetId, assetModifi
         let response = await networkObj.contract.submitTransaction('changeOwnershipOfAsset', assetId, assetModifier, newAssetOwner);
         //if successful, send email to previous and new owners.
         if ('data' in JSON.parse(response)) {
-            networkObj.event_hub.connect(true);
-            let regid = networkObj.event_hub.registerChaincodeEvent(smartContractName, 'UpdateOwnershipOfAssetEvent-' + assetId, function(event) {
-                console.log(`Inside event hub code - The owner of Digital Asset ${assetId} was successfully updated.`);
-
-                let transporter = nodemailer.createTransport({
-                    host: smtpHost,
-                    port: smtpPort,
-                    auth: {
-                        user: smtpUserName,
-                        pass: smtpPassword
-                    }
-                });
-
-                let mailOptions = {
-                    from: senderEmail,
-                    to: [assetModifier, newAssetOwner],
-                    subject: 'Digital asset was updated recently',
-                    html: '<h1>The following digital asset was updated recently.</h1>' +
-                        '<h2>Details:</h2>' +
-                        '<p>Asset Id: ' + assetId + '<br/>' +
-                        'Updated By (Previous Asset Owner): ' + assetModifier + '<br/>' +
-                        'New Asset Owner: ' + newAssetOwner + '<br/>' +
-                        '</p>'
-                };
-                transporter.sendMail(mailOptions, function(error) {
-                    if (error) {
-                        throw new Error(error);
-                    } else {
-                        console.log(`Successfully sent an email notification to the previous asset owner ${assetModifier} and the new asset owner ${newAssetOwner}`);
-                        networkObj.event_hub.unregisterChaincodeEvent(regid);
-                    }
-                });
-            });
+            console.log(`Inside event hub code - The owner of Digital Asset ${assetId} was successfully updated.`);
         }
 
         await networkObj.gateway.disconnect();
@@ -428,23 +308,10 @@ exports.processAssetModRequest = async function(networkObj, assetId, assetModId,
             let approvalSuccess = false;
             if (approve) {
                 //Step 3: Move in COS
-                response = await this.moveObject(assetModId, assetId);
-                if (response.data) {
-                    //successfully moved in COS
-                    //Step 4: Update blockchain
-                    response = await networkObj.contract.submitTransaction('updateDigitalAsset', assetId, modificationPendingApproval.modFileHash, modificationPendingApproval.lastModifiedBy);
-                    if ('data' in JSON.parse(response)) {
-                        //successfully updated blockchain
-                        approvalSuccess = true;
-                    }
-                }
+            
             } else {
                 //Step 3: Delete in COS
-                response = await this.deleteObject(assetModId);
-                if (response.err) {
-                    //not successfully deleted in COS
-                    console.error(response.err);
-                }
+                
             }
             //Step 5: Delete modification from list of pending mods
             if (!approve || (approve && approvalSuccess)) {
@@ -452,58 +319,8 @@ exports.processAssetModRequest = async function(networkObj, assetId, assetModId,
                 response = await networkObj.contract.submitTransaction('deleteModificationPendingApprovalFromAsset', assetId, assetModId);
                 if ('data' in JSON.parse(response)) {
                     //Step 6: Once all the transactions are complete and event notification is received - send an email to both the users.
-                    networkObj.event_hub.connect(true);
-                    let regid = networkObj.event_hub.registerChaincodeEvent(smartContractName, 'DeleteModificationPendingApprovalFromAssetEvent-' + assetId, function(event) {
-                        console.log(`Inside event hub code - The Digital Asset modification request for ${assetId} was successfully processed.`);
-                        // obtain the assetModifier's email address
-                        let eventPayload = JSON.parse(event.payload.toString());
-                        let assetModifier = modificationPendingApproval.lastModifiedBy;
-                        let modifiedTimestamp = new Date(eventPayload.modifiedTimestamp).toLocaleString();
-                        let transporter = nodemailer.createTransport({
-                            host: smtpHost,
-                            port: smtpPort,
-                            auth: {
-                                user: smtpUserName,
-                                pass: smtpPassword
-                            }
-                        });
-                        //email subject/body should be according to approve and addApprovedUser values.
-                        let subject = approve ? 'Digital asset modification request was approved recently' : 'Digital asset modification request was denied recently';
-                        let html = '<h1>The following digital asset\'s modification was ' + (approve ? 'approved' : 'denied') + ' recently.</h1>' +
-                            '<h2>Details:</h2>' +
-                            '<p>Asset Id: ' + assetId + '<br/>';
-                        if (approve) {
-                            html += 'Approved By (Asset Owner): ' + emailAddress + '<br/>' +
-                                'Updated By (Asset Modifier): ' + assetModifier + '<br/>' +
-                                'Update Timestamp: ' + new Date(modifiedTimestamp) + '<br/>';
-                            if (addApprovedUser) {
-                                html += '</p>' + '<br/><br/>' +
-                                    '<p>The asset modifier ' + assetModifier +
-                                    ' has also been added to the list of approved users for this asset. ' +
-                                    'As a result, all future modifications of this asset by ' + assetModifier +
-                                    ' will be processed without the need for approval by the Asset Owner ' + emailAddress;
-                            }
-                        } else {
-                            html += 'Denied By (Asset Owner): ' + emailAddress + '<br/>' +
-                                'Modification Requested By (Asset Modifier): ' + assetModifier + '<br/>';
-                        }
-                        html += '</p>';
-                        let mailOptions = {
-                            from: senderEmail,
-                            to: [emailAddress, assetModifier],
-                            subject: subject,
-                            html: html
-                        };
-                        transporter.sendMail(mailOptions, function(error) {
-                            if (error) {
-                                throw new Error(error);
-                            } else {
-                                console.log(`Successfully sent an email notification to the asset owner ${emailAddress} and the user that requested the modification ${assetModifier}`);
-                                networkObj.event_hub.unregisterChaincodeEvent(regid);
-                            }
-                        });
-                    });
-                }
+                    console.log("+++++++++++++Complete+++++++++++++++++");
+                };
             }
         }
 
@@ -540,12 +357,7 @@ exports.deleteDigitalAsset = async function(networkObj, assetId, assetDeleter) {
         }
         await networkObj.gateway.disconnect();
 
-        // Step 3: Delete from COS (actually delete file from COS)
-        let COS_response = await this.deleteObject(assetId);
-        if (COS_response.err) {
-            console.error(COS_response.err);
-            return response;
-        }
+        // Step 3: Delete from Cection_org1
         return response;
     } catch (error) {
         console.error(`Failed to submit transaction: ${error}`);
